@@ -112,29 +112,28 @@ def display_tasks(conn, session_state):
             checked_tasks = []
             for task in tasks:
                 task_name, est_gol, completed_pomodoros = task
-                print(task)
+                # print(task)
                 # print(est_gol)
                 # print(completed_pomodoros)
                 exceeded_est = int(completed_pomodoros) > int(est_gol)
                 checkbox_label = f"{task_name} - {completed_pomodoros}/{est_gol} pomodoros"
-                
                 if exceeded_est:
                     st.success('Exceeded Estimated Pomodoros! to further continuem, Edit the task')
                     checkbox_label += " (Exceeded Estimated Pomodoros)"
                 checked = st.checkbox(checkbox_label, key=task_name)
                 if checked:
+                    session_state.edit_task_name = task_name
                     checked_tasks.append(task_name)
                     if session_state.get('timer_completed', True) or session_state.get('stopped', True):
-                        if completed_pomodoros < est_gol and session_state.edit_task_name != task_name:
-                            # print(session_state.edit_task_name)
+                        # if completed_pomodoros < est_gol and session_state.edit_task_name == task_name:
+                        if completed_pomodoros < est_gol:
+                            print("incrementing", task)
                             update_completed_pomodoros(conn, task_name, username, completed_pomodoros + 1)
-                        
-                            
                         session_state.timer_completed = False
                         session_state.stopped = False
-                    else:
-                        if session_state.edit_task_name == task_name:
-                            session_state.edit_task_name = None
+                    # else:
+                    #     if session_state.edit_task_name != task_name:
+                    #         session_state.edit_task_name = None
 
             buff, col1, col2, buff2 = st.columns([1, 2, 2, 1])
             with col1:
@@ -142,23 +141,31 @@ def display_tasks(conn, session_state):
                 if submit_delete:
                     for task_name in checked_tasks:
                         delete_task(conn, task_name, username)
+                        session_state.edit_task_name =  None
                     st.experimental_rerun()
 
             with col2:
                 edit_task_button = st.button("Edit Task")
-                if edit_task_button:
+                session_state.edit_button=edit_task_button;
+
+                # if session_state.edit_button:
+                if True:
                     if checked_tasks and len(checked_tasks) == 1:
                         session_state.edit_task_name = checked_tasks[0]
                     if session_state.edit_task_name:
-                        print('edit')
+                        # print('edit')
                         new_task_name = st.text_input("New Task Name", value=session_state.edit_task_name)
                         task_to_edit = session_state.edit_task_name
                         cursor.execute("SELECT est_gol, completed_pomodoros FROM tasks WHERE task_name = ? AND username = ?", (task_to_edit, username))
                         current_est_gol, current_completed_pomodoros = cursor.fetchone()
                         new_est_gol = st.text_input("New Estimated Pomodoros", value=current_est_gol)
                         submit_edit = st.button("Update Task")
-                        if submit_edit:
-                            update_task(conn, session_state.edit_task_name, new_task_name, new_est_gol, username, current_completed_pomodoros)
+                        session_state.update_button = submit_edit;
+                        print("edit fetch", session_state.edit_task_name, new_task_name)
+
+                        if session_state.update_button:
+                            print("hello")
+                            update_task(conn=conn, old_task_name=session_state.edit_task_name, new_task_name=new_task_name, new_est_gol=new_est_gol, username=username)
                             session_state.edit_task_name = None
                             st.experimental_rerun()
         else:
