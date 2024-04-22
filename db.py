@@ -5,11 +5,16 @@ from datetime import datetime
 def create_connection(db_file):
     conn = None
     try:
-        conn = sqlite3.connect(db_file)
+        if not conn:
+            conn = sqlite3.connect(db_file)
+            print(f"Connected to database: {db_file}")
+        else:
+            print("Connection already established.")
+        
         return conn
     except sqlite3.Error as e:
         st.error(f"Error connecting to SQLite database: {e}")
-    return conn
+    # return conn
 
 # Function to create table in SQLite database
 def create_table(conn):
@@ -121,6 +126,10 @@ def authenticate_user_in_sign_up(conn, username, email):
                     st.write('Email already taken!')
             else:
                 authenticated = True
+                # conn.close()
             return authenticated
         except sqlite3.Error as e:
             print(f"SQLite error: {e}")
+
+
+# def handle_logout(conn, ):
