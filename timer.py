@@ -5,7 +5,7 @@ def time_input():
     col1, col2, col3 = st.columns([1, 3, 1])
 
     with col2:
-        time_minutes = st.number_input('Enter the time in minutes ', min_value=1, value=25)
+        time_minutes = st.number_input('Enter the time in minutes ',step = 5, min_value=1, value=25)
         return time_minutes
 
 def time_display(time_in_seconds):
@@ -36,17 +36,15 @@ def main(time_in_minutes=25):
         st.button("Start", on_click=lambda: session_state.update(timer_widget='counter_widget'))
     if timer_widget == 'stopped_widget':
         time_in_seconds = og_time_in_seconds
+        session_state.stopped = True
         time_display(time_in_seconds)
     if timer_widget == 'counter_widget':
         with st.empty():
             while time_in_seconds:
                 time_in_seconds = time_display(time_in_seconds)
                 print(f'inside while loop: {time_in_seconds}')
-                if session_state.paused:
-                    print(f'breaked in while loop: {time_in_seconds}')
-                    break
-
             print(f'after while loop: {time_in_seconds}')
+    return session_state.stopped
     
 
 if __name__ == "__main__":
