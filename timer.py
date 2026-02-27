@@ -1,6 +1,13 @@
 import streamlit as st
 import time
 
+
+def _rerun():
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:
+        st.experimental_rerun()
+
 def count_down(ts, paused, stop):
     original_ts = ts
     with st.empty():
@@ -12,7 +19,7 @@ def count_down(ts, paused, stop):
                 time_now = '{:02d}:{:02d}'.format(mins, secs)
                 return st.title(f'{time_now}')
             if stop and paused:
-                st.experimental_rerun()
+                _rerun()
             mins, secs = divmod(ts, 60)
             time_now = '{:02d}:{:02d}'.format(mins, secs)
             st.title(f"{time_now}")
