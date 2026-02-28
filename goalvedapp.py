@@ -5,12 +5,12 @@ from db import create_connection, insert_data, update_completed_pomodoros, creat
 from login_register import login_register
 from streamlit_cookies_manager import EncryptedCookieManager
 
+st.set_page_config(page_title="Goalveda", page_icon="🍅", layout="centered")
+
 # Initialize Cookie Manager
 cookies = EncryptedCookieManager(prefix="goalveda", password="super_secret_password")
 if not cookies.ready():
     st.stop()
-
-st.set_page_config(page_title="Goalveda", page_icon="🍅", layout="centered")
 
 def inject_custom_css(mode):
     bg_color = "#ba4949"
