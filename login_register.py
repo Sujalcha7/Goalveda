@@ -7,9 +7,13 @@ from http.cookies import SimpleCookie
 
 def login_register(conn):
     session_state = st.session_state
-    session_state.authenticated = session_state.get('authenticated', False)
-    session_state.registered = session_state.get('registered', True)
-    session_state.option = session_state.get('option', "Login")
+    
+    # We don't want to inherit a "True" authenticated state from a previous session run
+    # if the user is explicitly on this login screen, they are not authenticated.
+    if 'option' not in session_state:
+        session_state.option = "Login"
+    if 'registered' not in session_state:
+        session_state.registered = True
 
     # conn = create_connection('golveda.db')
     # if not conn:
@@ -40,19 +44,20 @@ def login_register(conn):
             login_button = st.form_submit_button("Login")
         st.button("Register", key="register_button", on_click=lambda: session_state.update(option="Register"))
         if login_button:
-            if authenticate_user_in_login(conn, username, password):
+            if not username or not password:
+                st.error("Please provide both username and password.")
+            elif authenticate_user_in_login(conn, username, password):
                 print('authenticated')
                 session_state.authenticated = True
                 session_state.username = username  # Store the username in the session state
                 insert_login_data(conn, username, password)  # Insert login data with username and login time
                 # conn.close()
                 st.success("Login successful!")
-                return session_state.authenticated  # Return True to indicate successful login
+                return True  # Explicitly return True on successful login
             else:
                 st.error("Invalid username or password")
-                return session_state.authenticated
-        # if session_state.authenticated == True:
-        # st.button("Register", key="register_button", on_click=lambda: session_state.update(option="Register"))
+        
+        return False # Return False by default if not authenticated
 
     elif option == "Register":
         with st.form("registration_form"):
@@ -64,7 +69,9 @@ def login_register(conn):
             # st.form_submit_button("Register", on_click=lambda: session_state.update(option="Login")if session_state.registered == True else st.error('Enter credentials first!'))
         st.button("Login", key="login_button", on_click=lambda: session_state.update(option="Login"))
         if register_button:
-            if authenticate_user_in_sign_up(conn, username, email):
+            if not username or not email or not password:
+                st.error("Please fill out all fields.")
+            elif authenticate_user_in_sign_up(conn, username, email):
                 print(f'{username}\n{email}\n {password}')
                 insert_sign_up_data(conn, username, email, password)
                 print('yess')

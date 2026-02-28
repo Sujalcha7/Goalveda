@@ -1,7 +1,7 @@
 import streamlit as st
 import sqlite3
 import time
-from db import create_connection, insert_data, update_completed_pomodoros
+from db import create_connection, insert_data, update_completed_pomodoros, create_table
 from login_register import login_register
 from streamlit_cookies_manager import EncryptedCookieManager
 
@@ -93,7 +93,23 @@ def delete_task(conn, task_name, username):
 
 def main():
     conn = create_connection("golveda.db")
+    if conn is not None:
+        create_table(conn)
     
+    logout_happened = False
+    if st.session_state.get('logout_pending'):
+        logout_happened = True
+        
+        # Aggressively delete everything from session state to prevent ghost cache
+        keys_to_delete = list(st.session_state.keys())
+        for key in keys_to_delete:
+            del st.session_state[key]
+            
+        # Empty out the cookie
+        if "username" in cookies:
+            cookies["username"] = ""
+            cookies.save()
+
     if 'authenticated' not in st.session_state:
         st.session_state.authenticated = False
         st.session_state.username = None
@@ -106,7 +122,7 @@ def main():
     inject_custom_css(st.session_state.timer_mode)
 
     # Check Cookie Auth First
-    if cookies.get("username"):
+    if cookies.get("username") and not logout_happened:
         st.session_state.authenticated = True
         st.session_state.username = cookies.get("username")
 
@@ -135,10 +151,8 @@ def main():
                 st.rerun()
     with col3:
         if st.button("Logout", use_container_width=True):
-            st.session_state.authenticated = False
-            if "username" in cookies:
-                del cookies["username"]
-                cookies.save()
+            st.session_state.authenticated = False 
+            st.session_state.logout_pending = True
             st.rerun()
 
     # --- TIMER COMPONENT ---
