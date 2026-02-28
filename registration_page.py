@@ -35,7 +35,7 @@
 #                 # session_state.can_login = True
 #                 session_state.can_login = True
 #                 return session_state.can_login
-#                 # st.experimental_rerun()
+#                 # st.rerun()
         
 #         with col3:
 #             pass

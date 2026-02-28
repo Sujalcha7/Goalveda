@@ -2,14 +2,18 @@ import sqlite3
 import streamlit as st
 import bcrypt
 from datetime import datetime
+
 def create_connection(db_file):
     conn = None
     try:
-        conn = sqlite3.connect(db_file)
+        if not conn:
+            conn = sqlite3.connect(db_file)
+            print(f"Connected to database: {db_file}")
+        else:
+            print("Connection already established.")
         return conn
     except sqlite3.Error as e:
         st.error(f"Error connecting to SQLite database: {e}")
-    return conn
 
 # Function to create table in SQLite database
 def create_table(conn):
@@ -19,7 +23,8 @@ def create_table(conn):
                         id INTEGER PRIMARY KEY,
                         task_name TEXT NOT NULL,
                         username TEXT NOT NULL,
-                        est_gol INTEGER NOT NULL
+                        est_gol INTEGER NOT NULL,
+                        completed_pomodoros INTEGER DEFAULT 0
                      )''')
         conn.commit()
     except sqlite3.Error as e:
@@ -34,7 +39,6 @@ def insert_data(conn, username, task_name, est):
         st.success("Data inserted successfully!")
     except sqlite3.Error as e:
         st.error(f"Error inserting data: {e}")
-
 
 def create_login_table(conn):
     try:
@@ -60,7 +64,6 @@ def insert_login_data(conn, username, password):
     except sqlite3.Error as e:
         st.error(f"Error inserting data: {e}")
 
-
 def create_sign_up_table(conn):
     try:
         c = conn.cursor()
@@ -76,7 +79,6 @@ def create_sign_up_table(conn):
 
 def insert_sign_up_data(conn, username, email, password):
     hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-    print(hashed_password)
     try:
         c = conn.cursor()
         c.execute('''INSERT INTO user_credentials (username, email, password) VALUES (?, ?, ?)''', (username, email, hashed_password))
@@ -92,11 +94,9 @@ def authenticate_user_in_login(conn, username, password):
         cursor = conn.cursor()
         cursor.execute('''SELECT password FROM user_credentials WHERE username = ?''', (username, ))
         hashed_password = cursor.fetchone()
-        print(hashed_password)
         if hashed_password:
             # Verify password using bcrypt.checkpw
             authenticated = bcrypt.checkpw(password.encode('utf-8'), hashed_password[0])
-            print(authenticated)
             if authenticated:
                 return True
         else:
@@ -124,3 +124,20 @@ def authenticate_user_in_sign_up(conn, username, email):
             return authenticated
         except sqlite3.Error as e:
             print(f"SQLite error: {e}")
+
+@st.cache_data
+def update_completed_pomodoros(_conn, task_name, username, completed_pomodoros):
+    cursor = _conn.cursor()
+    cursor.execute("UPDATE tasks SET completed_pomodoros = ? WHERE task_name = ? AND username = ?", (completed_pomodoros, task_name, username))
+    _conn.commit()
+
+@st.cache_data
+def update_task(conn, old_task_name, new_task_name, new_est_gol, username, completed_pomodoros):
+    cursor = conn.cursor()
+    cursor.execute("UPDATE tasks SET task_name = ?, est_gol = ?, completed_pomodoros = ? WHERE task_name = ? AND username = ?", (new_task_name, new_est_gol, completed_pomodoros, old_task_name, username))
+    conn.commit()
+
+# def update_completed_pomodoros(conn, task_name, username, completed_pomodoros):
+#     cursor = conn.cursor()
+#     cursor.execute("UPDATE tasks SET completed_pomodoros = ? WHERE task_name = ? AND username = ?", (completed_pomodoros, task_name, username))
+#     conn.commit()

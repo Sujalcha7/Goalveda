@@ -45,4 +45,4 @@ Streamlit will print a local URL (usually `http://localhost:8501`). Open it in y
 ## Notes
 
 - The app uses `golveda.db` (SQLite) in the project directory.
-- First run will create the needed tables automatically.
+- First run will create the needed tables 
