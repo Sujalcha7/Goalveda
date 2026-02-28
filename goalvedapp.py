@@ -1,180 +1,267 @@
 import streamlit as st
 import sqlite3
-from db import *
+import time
+from db import create_connection, insert_data, update_completed_pomodoros
 from login_register import login_register
-import pandas as pd
-import timer
+from streamlit_cookies_manager import EncryptedCookieManager
+
+# Initialize Cookie Manager
+cookies = EncryptedCookieManager(prefix="goalveda", password="super_secret_password")
+if not cookies.ready():
+    st.stop()
+
+st.set_page_config(page_title="Goalveda", page_icon="🍅", layout="centered")
+
+def inject_custom_css(mode):
+    bg_color = "#ba4949"
+    if mode == "short_break":
+        bg_color = "#38858a"
+    elif mode == "long_break":
+        bg_color = "#397097"
+
+    css = f"""
+    <style>
+        .stApp {{
+            background-color: {bg_color};
+            transition: background-color 0.5s ease;
+        }}
+        .stApp header {{
+            background-color: transparent;
+        }}
+        .timer-text {{
+            font-size: 1000px;
+            font-weight: bold;
+            color: white;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            line-height: 1;
+        }}
+        .stButton > button {{
+            background-color: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 0.5rem 1rem;
+            font-weight: bold;
+            transition: background-color 0.2s ease;
+        }}
+        .stButton > button:hover {{
+            background-color: rgba(255, 255, 255, 0.3);
+            color: white;
+        }}
+        .start-button button {{
+            background-color: white !important;
+            color: {bg_color} !important;
+            font-size: 24px !important;
+            padding: 1rem 3rem !important;
+            border-radius: 8px !important;
+            box-shadow: 0 4px 0 rgba(0,0,0,0.1) !important;
+            display: block;
+            margin: 0 auto;
+        }}
+        .task-container {{
+            background-color: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: bold;
+            border-left: 6px solid {bg_color};
+        }}
+        /* Hide sidebar completely if not needed */
+        [data-testid="collapsedControl"] {{
+            display: none;
+        }}
+        h1, h2, h3, p, span, div, label {{
+            color: white ;
+        }}
+        .task-container span, .task-container div {{
+             color: #555 !important;
+        }}
+        .task-container form p {{
+             color: #555 !important;
+        }}
+    </style>
+    """
+    st.markdown(css, unsafe_allow_html=True)
 
 def delete_task(conn, task_name, username):
     cursor = conn.cursor()
     cursor.execute("DELETE FROM tasks WHERE task_name = ? AND username = ?", (task_name, username))
     conn.commit()
 
-def update_task(conn, old_task_name, new_task_name, new_est_gol, username):
-    cursor = conn.cursor()
-    cursor.execute("UPDATE tasks SET task_name = ?, est_gol = ? WHERE task_name = ? AND username = ?", (new_task_name, new_est_gol, old_task_name, username))
-    conn.commit()
-
 def main():
-    session_state = st.session_state
     conn = create_connection("golveda.db")
-    session_state.authenticated = session_state.get('authenticated', False)
-    session_state.page = session_state.get('page', 'login_register')
-    session_state.timer_duration = session_state.get('timer_duration', 25)
-    page = session_state.page
+    
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+        st.session_state.username = None
+        st.session_state.timer_mode = 'pomodoro' # pomodoro, short_break, long_break
+        st.session_state.timer_running = False
+        st.session_state.time_left = 25 * 60
+        st.session_state.settings = {'pomodoro': 25, 'short_break': 5, 'long_break': 15}
+        st.session_state.active_task_name = None
 
-    if 'edit_task_name' not in session_state:
-        session_state.edit_task_name = None
+    inject_custom_css(st.session_state.timer_mode)
 
-    # Show the login/register page without sidebar
-    if not session_state.authenticated:
+    # Check Cookie Auth First
+    if cookies.get("username"):
+        st.session_state.authenticated = True
+        st.session_state.username = cookies.get("username")
+
+    if not st.session_state.authenticated:
         if login_register(conn) == True:
-            session_state.authenticated = True
-        if session_state.authenticated == True:
-            session_state.update(page='Homepage')  # Redirect to Homepage after successful login
-            st.experimental_rerun()
-    else:
-        # Render the sidebar
-        with st.sidebar:
-            st.header("Navigation")
-            page = session_state.page
-            homepage_button = st.button("Homepage", key="homepage_button", on_click=lambda: session_state.update(page="Homepage"))
-            tasks_button = st.button("Tasks", key="tasks_button", on_click=lambda: session_state.update(page="Tasks"))
-            settings_button = st.button("Settings", key="settings_button", on_click=lambda: session_state.update(page="Settings"))
-            logout_button = st.button("Logout", key="logout_button", on_click=lambda: session_state.update(page="Logout"))
+            st.session_state.authenticated = True
+            cookies["username"] = st.session_state.username # Save auth to cookie
+            cookies.save()
+            st.rerun()
+        return
 
-        if page == 'Homepage':
-            st.title("Welcome to Goalveda!")
-            # Add any other content for the homepage here
-
-        elif page == 'Tasks':
-            display_tasks(conn, session_state)
-
-        elif page == 'Settings':
-            timer_duration = st.number_input("Set Timer Duration (minutes)", min_value=1, value=session_state.timer_duration)
-            session_state.timer_duration = timer_duration
-
-        elif page == 'Logout':
-            # Clear session state and redirect to login page
-            for key in st.session_state.keys():
-                del st.session_state[key]
-            session_state.update(page='login_register')
-            st.experimental_rerun()
-
-    # Apply CSS styles
-    css = """
-        <style>
-            .stButton button {
-                width: 120px;
-                height: 40px;
-                font-size: 16px;
-                transition: background-color 0.3s, color 0.3s;
-            }
-            .stButton button:hover {
-                background-color: white;
-                color: black;
-            }
-            .st-emotion-cache-cnbvxy.e1nzilvr5 h1 {
-                font-size: 80px;
-                text-align: center
-            }
-            input.st-ae.st-bc.st-bd.st-be.st-bf.st-bg.st-bh.st-bi.st-bj.st-bk.st-bl.st-ah.st-bm.st-bn.st-bo.st-bp.st-bq.st-br.st-bs.st-bt.st-ax.st-ay.st-az.st-bu.st-b1.st-b2.st-bb.st-bv.st-bw.st-bx {
-                color: black;
-                caret-color: black; /* Change caret color to black */
-            }
-        </style>
-    """
-    st.markdown(css, unsafe_allow_html=True)
-def display_tasks(conn, session_state):
-    buff, col, buff2 = st.columns([1, 3, 1])
-    with col:
-        session_state.stopped = timer.main(session_state.timer_duration)
-
-        st.subheader("Insert Data")
-        name = st.text_input('New task:')
-        est_gol = st.number_input('est. pomodoros:', step=5, min_value=1, max_value=60)
-        if st.button("Insert"):
-            if name and est_gol:
-                username = session_state.get('username', '')
-                insert_data(conn, username, name, est_gol)
-            else:
-                st.warning("Please fill in both name and est_gol.")
-
-    # Display tasks
-    buff, col1, col2 = st.columns([1, 3, 1])
+    # Top Navigation / Header
+    col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
-        st.subheader("Tasks")
-        cursor = conn.cursor()
-        username = session_state.get('username')
-        cursor.execute('''SELECT task_name, est_gol, completed_pomodoros FROM tasks WHERE username = ?''', (username,))
-        tasks = cursor.fetchall()
-        if tasks:
-            checked_tasks = []
-            for task in tasks:
-                task_name, est_gol, completed_pomodoros = task
-                # print(task)
-                # print(est_gol)
-                # print(completed_pomodoros)
-                exceeded_est = int(completed_pomodoros) > int(est_gol)
-                checkbox_label = f"{task_name} - {completed_pomodoros}/{est_gol} pomodoros"
-                if exceeded_est:
-                    st.success('Exceeded Estimated Pomodoros! to further continuem, Edit the task')
-                    checkbox_label += " (Exceeded Estimated Pomodoros)"
-                checked = st.checkbox(checkbox_label, key=task_name)
-                if checked:
-                    session_state.edit_task_name = task_name
-                    checked_tasks.append(task_name)
-                    if session_state.get('timer_completed', True) or session_state.get('stopped', True):
-                        # if completed_pomodoros < est_gol and session_state.edit_task_name == task_name:
-                        if completed_pomodoros < est_gol:
-                            print("incrementing", task)
-                            update_completed_pomodoros(conn, task_name, username, completed_pomodoros + 1)
-                        session_state.timer_completed = False
-                        session_state.stopped = False
-                    # else:
-                    #     if session_state.edit_task_name != task_name:
-                    #         session_state.edit_task_name = None
+        st.markdown("### 🍅 Goalveda")
+    with col2:
+        with st.expander("⚙️ Settings"):
+            pomo_t = st.number_input("Pomodoro (min)", min_value=1, value=st.session_state.settings['pomodoro'])
+            short_t = st.number_input("Short Break (min)", min_value=1, value=st.session_state.settings['short_break'])
+            long_t = st.number_input("Long Break (min)", min_value=1, value=st.session_state.settings['long_break'])
+            if st.button("Save Settings"):
+                st.session_state.settings['pomodoro'] = pomo_t
+                st.session_state.settings['short_break'] = short_t
+                st.session_state.settings['long_break'] = long_t
+                st.session_state.time_left = st.session_state.settings[st.session_state.timer_mode] * 60
+                st.rerun()
+    with col3:
+        if st.button("Logout", use_container_width=True):
+            st.session_state.authenticated = False
+            if "username" in cookies:
+                del cookies["username"]
+                cookies.save()
+            st.rerun()
 
-            buff, col1, col2, buff2 = st.columns([1, 2, 2, 1])
-            with col1:
-                submit_delete = st.button("Delete Tasks")
-                if submit_delete:
-                    for task_name in checked_tasks:
-                        delete_task(conn, task_name, username)
-                        session_state.edit_task_name =  None
-                    st.experimental_rerun()
+    # --- TIMER COMPONENT ---
+    st.write("---")
+    t_col1, t_col2, t_col3 = st.columns([1, 1, 1])
+    with t_col1:
+        if st.button("Pomodoro", use_container_width=True):
+            st.session_state.timer_mode = 'pomodoro'
+            st.session_state.timer_running = False
+            st.session_state.time_left = st.session_state.settings['pomodoro'] * 60
+            st.rerun()
+    with t_col2:
+        if st.button("Short Break", use_container_width=True):
+            st.session_state.timer_mode = 'short_break'
+            st.session_state.timer_running = False
+            st.session_state.time_left = st.session_state.settings['short_break'] * 60
+            st.rerun()
+    with t_col3:
+        if st.button("Long Break", use_container_width=True):
+            st.session_state.timer_mode = 'long_break'
+            st.session_state.timer_running = False
+            st.session_state.time_left = st.session_state.settings['long_break'] * 60
+            st.rerun()
 
-            with col2:
-                edit_task_button = st.button("Edit Task")
-                session_state.edit_button=edit_task_button;
+    timer_placeholder = st.empty()
+    
+    # We use a container specifically for the button to style it correctly via CSS
+    st.markdown('<div class="start-button">', unsafe_allow_html=True)
+    if st.session_state.timer_running:
+        if st.button("PAUSE", use_container_width=True):
+            st.session_state.timer_running = False
+            st.rerun()
+    else:
+        if st.button("START", use_container_width=True):
+            st.session_state.timer_running = True
+            st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
-                # if session_state.edit_button:
-                if True:
-                    if checked_tasks and len(checked_tasks) == 1:
-                        session_state.edit_task_name = checked_tasks[0]
-                    if session_state.edit_task_name:
-                        # print('edit')
-                        new_task_name = st.text_input("New Task Name", value=session_state.edit_task_name)
-                        task_to_edit = session_state.edit_task_name
-                        cursor.execute("SELECT est_gol, completed_pomodoros FROM tasks WHERE task_name = ? AND username = ?", (task_to_edit, username))
-                        current_est_gol, current_completed_pomodoros = cursor.fetchone()
-                        new_est_gol = st.text_input("New Estimated Pomodoros", value=current_est_gol)
-                        submit_edit = st.button("Update Task")
-                        session_state.update_button = submit_edit;
-                        print("edit fetch", session_state.edit_task_name, new_task_name)
+    # Display initial time
+    mins, secs = divmod(st.session_state.time_left, 60)
+    timer_placeholder.markdown(f'<div style="text-align: center; font-size: 10rem; font-weight: bold; color: white; line-height: 1;">{mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
 
-                        if session_state.update_button:
-                            print("hello")
-                            update_task(conn=conn, old_task_name=session_state.edit_task_name, new_task_name=new_task_name, new_est_gol=new_est_gol, username=username)
-                            session_state.edit_task_name = None
-                            st.experimental_rerun()
-        else:
-            st.info("No tasks added yet.")
+    # --- TASKS COMPONENT ---
+    st.write("---")
+    st.subheader("Tasks")
+    
+    # Add Task Form
+    with st.expander("➕ Add Task"):
+        new_task = st.text_input("What are you working on?")
+        est_pomodoros = st.number_input("Est Pomodoros", min_value=1, step=1, value=1)
+        if st.button("Save Task"):
+            if new_task:
+                username = st.session_state.get('username', 'user')
+                insert_data(conn, username, new_task, est_pomodoros)
+                st.success("Task added!")
+                st.rerun()
 
-    # Update the timer_completed flag when the timer is stopped or completed
-    if session_state.get('stopped', False) or (session_state.get('remaining_time', 0)==0):
-        session_state.timer_completed = True
-        session_state.stopped = False
+    # List Tasks
+    cursor = conn.cursor()
+    username = st.session_state.get('username', 'user')
+    cursor.execute("SELECT task_name, est_gol, completed_pomodoros FROM tasks WHERE username = ?", (username,))
+    tasks = cursor.fetchall()
+    
+    if not tasks:
+        st.info("No tasks yet. Add one above!")
+    else:
+        for task in tasks:
+            t_name, est_gol, completed = task
+            is_active = (st.session_state.get('active_task_name') == t_name)
+            
+            with st.container():
+                st.markdown(f'''
+                    <div class="task-container" style="display:flex; justify-content:space-between; align-items:center;">
+                        <div style="font-size:1.1rem; color: #555 !important;">{t_name}</div>
+                        <div style="font-size:1.1rem; color: #555 !important; font-weight: bold;">{completed} / {est_gol}</div>
+                    </div>
+                ''', unsafe_allow_html=True)
+                
+                c1, c2, c3 = st.columns([1,1,2])
+                with c1:
+                    if is_active:
+                        st.button("🎯 Active", key=f"active_{t_name}", disabled=True)
+                    else:
+                        if st.button("Set Active", key=f"set_active_{t_name}"):
+                            st.session_state.active_task_name = t_name
+                            st.rerun()
+                with c2:
+                    if st.button("🗑️ Delete", key=f"del_{t_name}"):
+                        delete_task(conn, t_name, username)
+                        if st.session_state.get('active_task_name') == t_name:
+                            st.session_state.active_task_name = None
+                        st.rerun()
+
+    # Timer Loop execution (must run last to allow rendering above it)
+    if st.session_state.timer_running:
+        while st.session_state.time_left > 0 and st.session_state.timer_running:
+            time.sleep(1)
+            st.session_state.time_left -= 1
+            mins, secs = divmod(st.session_state.time_left, 60)
+            timer_placeholder.markdown(f'<div style="text-align: center; font-size: 15rem; font-weight: bold; color: white; line-height: 1;">{mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
+            
+        if st.session_state.time_left == 0:
+            st.session_state.timer_running = False
+            
+            # Automatically update the completed pomodoros if it's a pomodoro session
+            if st.session_state.timer_mode == 'pomodoro' and st.session_state.get('active_task_name'):
+                cursor = conn.cursor()
+                cursor.execute("SELECT completed_pomodoros FROM tasks WHERE task_name = ? AND username = ?", (st.session_state.active_task_name, username))
+                row = cursor.fetchone()
+                if row:
+                    update_completed_pomodoros(conn, st.session_state.active_task_name, username, row[0] + 1)
+                    
+            # Play an alert via HTML audio tag
+            autoplay_audio = '''
+                <audio autoplay="true">
+                <source src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" type="audio/mpeg">
+                </audio>
+            '''
+            st.markdown(autoplay_audio, unsafe_allow_html=True)
+            st.success("Time's up!")
+            st.session_state.time_left = st.session_state.settings[st.session_state.timer_mode] * 60
+            time.sleep(2) # Give user a chance to hear audio
+            st.rerun()
+
 if __name__ == "__main__":
     main()
-

@@ -36,7 +36,7 @@ def main():
             session_state.username = st.session_state.username 
         if session_state.authenticated == True:
             session_state.update(page='main_page')
-            st.experimental_rerun()
+            st.rerun()
 
     elif page == 'main_page':
         # Insert data form
