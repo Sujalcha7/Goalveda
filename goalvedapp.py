@@ -10,9 +10,12 @@ def delete_task(conn, task_name, username):
     cursor.execute("DELETE FROM tasks WHERE task_name = ? AND username = ?", (task_name, username))
     conn.commit()
 
-def update_task(conn, old_task_name, new_task_name, new_est_gol, username):
+def update_task_local(conn, old_task_name, new_task_name, new_est_gol, username, completed_pomodoros=None):
     cursor = conn.cursor()
-    cursor.execute("UPDATE tasks SET task_name = ?, est_gol = ? WHERE task_name = ? AND username = ?", (new_task_name, new_est_gol, old_task_name, username))
+    if completed_pomodoros is not None:
+        cursor.execute("UPDATE tasks SET task_name = ?, est_gol = ?, completed_pomodoros = ? WHERE task_name = ? AND username = ?", (new_task_name, new_est_gol, completed_pomodoros, old_task_name, username))
+    else:
+        cursor.execute("UPDATE tasks SET task_name = ?, est_gol = ? WHERE task_name = ? AND username = ?", (new_task_name, new_est_gol, old_task_name, username))
     conn.commit()
 
 def main():
@@ -32,7 +35,7 @@ def main():
             session_state.authenticated = True
         if session_state.authenticated == True:
             session_state.update(page='Homepage')  # Redirect to Homepage after successful login
-            st.experimental_rerun()
+            st.rerun()
     else:
         # Render the sidebar
         with st.sidebar:
@@ -59,7 +62,7 @@ def main():
             for key in st.session_state.keys():
                 del st.session_state[key]
             session_state.update(page='login_register')
-            st.experimental_rerun()
+            st.rerun()
 
     # Apply CSS styles
     css = """
@@ -88,8 +91,13 @@ def main():
 def display_tasks(conn, session_state):
     buff, col, buff2 = st.columns([1, 3, 1])
     with col:
-        session_state.stopped = timer.main(session_state.timer_duration)
-
+        # Timer duration input for user (1 = 10 seconds for testing)
+        timer_duration = st.number_input('Timer duration (minutes, 1=10s)', step=1, min_value=1, value=1, key='timer_duration_input')
+        session_state.timer_duration = timer_duration
+        # Run the timer and set a flag if completed
+        timer_stopped = timer.main(timer_duration)
+        if timer_stopped:
+            session_state.stopped = True
         st.subheader("Insert Data")
         name = st.text_input('New task:')
         est_gol = st.number_input('est. pomodoros:', step=5, min_value=1, max_value=60)
@@ -110,30 +118,33 @@ def display_tasks(conn, session_state):
         tasks = cursor.fetchall()
         if tasks:
             checked_tasks = []
+            timer_completed = session_state.get('timer_completed', False)
+            # If timer just completed, increment for the last selected task
+            if timer_completed and session_state.get('last_selected_task'):
+                task_name = session_state['last_selected_task']
+                # Find the task's current completed_pomodoros and est_gol
+                for task in tasks:
+                    t_name, est_gol, completed_pomodoros = task
+                    if t_name == task_name and completed_pomodoros < est_gol:
+                        update_completed_pomodoros(conn, task_name, username, completed_pomodoros + 1)
+                        session_state.timer_completed = False
+                        session_state.last_selected_task = None
+                        # Force refresh by clearing cache and rerunning
+                        st.cache_data.clear()
+                        st.rerun()
+            # Otherwise, display checkboxes and store last selected
             for task in tasks:
                 task_name, est_gol, completed_pomodoros = task
-                # print(task)
-                # print(est_gol)
-                # print(completed_pomodoros)
                 exceeded_est = int(completed_pomodoros) > int(est_gol)
                 checkbox_label = f"{task_name} - {completed_pomodoros}/{est_gol} pomodoros"
                 if exceeded_est:
-                    st.success('Exceeded Estimated Pomodoros! to further continuem, Edit the task')
+                    st.success('Exceeded Estimated Pomodoros! to further continue, Edit the task')
                     checkbox_label += " (Exceeded Estimated Pomodoros)"
-                checked = st.checkbox(checkbox_label, key=task_name)
+                checked = st.checkbox(checkbox_label, key=f"task_{task_name}")
                 if checked:
-                    session_state.edit_task_name = task_name
                     checked_tasks.append(task_name)
-                    if session_state.get('timer_completed', True) or session_state.get('stopped', True):
-                        # if completed_pomodoros < est_gol and session_state.edit_task_name == task_name:
-                        if completed_pomodoros < est_gol:
-                            print("incrementing", task)
-                            update_completed_pomodoros(conn, task_name, username, completed_pomodoros + 1)
-                        session_state.timer_completed = False
-                        session_state.stopped = False
-                    # else:
-                    #     if session_state.edit_task_name != task_name:
-                    #         session_state.edit_task_name = None
+                    # Store the last selected task for pomodoro increment
+                    session_state.last_selected_task = task_name
 
             buff, col1, col2, buff2 = st.columns([1, 2, 2, 1])
             with col1:
@@ -141,40 +152,35 @@ def display_tasks(conn, session_state):
                 if submit_delete:
                     for task_name in checked_tasks:
                         delete_task(conn, task_name, username)
-                        session_state.edit_task_name =  None
-                    st.experimental_rerun()
+                    session_state.edit_task_name = None
+                    st.rerun()
 
             with col2:
                 edit_task_button = st.button("Edit Task")
-                session_state.edit_button=edit_task_button;
-
-                # if session_state.edit_button:
-                if True:
-                    if checked_tasks and len(checked_tasks) == 1:
-                        session_state.edit_task_name = checked_tasks[0]
-                    if session_state.edit_task_name:
-                        # print('edit')
-                        new_task_name = st.text_input("New Task Name", value=session_state.edit_task_name)
-                        task_to_edit = session_state.edit_task_name
-                        cursor.execute("SELECT est_gol, completed_pomodoros FROM tasks WHERE task_name = ? AND username = ?", (task_to_edit, username))
-                        current_est_gol, current_completed_pomodoros = cursor.fetchone()
-                        new_est_gol = st.text_input("New Estimated Pomodoros", value=current_est_gol)
-                        submit_edit = st.button("Update Task")
-                        session_state.update_button = submit_edit;
-                        print("edit fetch", session_state.edit_task_name, new_task_name)
-
-                        if session_state.update_button:
-                            print("hello")
-                            update_task(conn=conn, old_task_name=session_state.edit_task_name, new_task_name=new_task_name, new_est_gol=new_est_gol, username=username)
-                            session_state.edit_task_name = None
-                            st.experimental_rerun()
+                session_state.edit_button = edit_task_button
+                if checked_tasks and len(checked_tasks) == 1:
+                    session_state.edit_task_name = checked_tasks[0]
+                if session_state.edit_task_name:
+                    new_task_name = st.text_input("New Task Name", value=session_state.edit_task_name)
+                    task_to_edit = session_state.edit_task_name
+                    cursor.execute("SELECT est_gol, completed_pomodoros FROM tasks WHERE task_name = ? AND username = ?", (task_to_edit, username))
+                    current_est_gol, current_completed_pomodoros = cursor.fetchone()
+                    new_est_gol = st.text_input("New Estimated Pomodoros", value=current_est_gol)
+                    submit_edit = st.button("Update Task")
+                    session_state.update_button = submit_edit
+                    if session_state.update_button:
+                        update_task_local(conn=conn, old_task_name=session_state.edit_task_name, new_task_name=new_task_name, new_est_gol=new_est_gol, username=username)
+                        session_state.edit_task_name = None
+                        st.rerun()
         else:
             st.info("No tasks added yet.")
 
-    # Update the timer_completed flag when the timer is stopped or completed
-    if session_state.get('stopped', False) or (session_state.get('remaining_time', 0)==0):
-        session_state.timer_completed = True
+    # Only set timer_completed flag if timer finished (not on stop/update/delete)
+    if session_state.get('stopped', False):
+        session_state.timer_completed = False
         session_state.stopped = False
+    # If timer finished naturally, set timer_completed
+    # (Assume timer.py sets session_state.timer_completed True when timer ends)
 if __name__ == "__main__":
     main()
 
